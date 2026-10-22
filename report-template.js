@@ -1,12 +1,12 @@
 /*!
- * Serity Project Budget & Delivery Report - template v2.3 (budget report)
+ * Serity Project Budget & Delivery Report - template v2.4 (budget report)
  * Renders window.REPORT_DATA (rows copied unchanged from Productive queries) into a fixed report.
  * All parsing, arithmetic, checks and findings happen here. Contains no customer data.
  * Requires Chart.js 4.x loaded before this script.
  */
 (function () {
   "use strict";
-  var VERSION = "2.3", MAJOR = 2;
+  var VERSION = "2.4", MAJOR = 2;
   var COL = { ceiling: "#6B7280", billable: "#2563EB", invoiced: "#059669", committed: "#D97706", cost: "#DC2626", booked: "#6B7280", actual: "#2563EB" };
   var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONFULL = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -224,7 +224,9 @@
   });
   if (MODE === "service") WORDER.sort(function (a, b) { return WS[b].ceiling - WS[a].ceiling; });
   WORDER.forEach(function (k) { var w = WS[k]; w.billM = {}; w.costM = {}; w.billQ = 0; w.cost = 0; w.timeQ = 0; });
+  function isFixed(b) { var bu = BUD[b]; return bu.svcOrder.length > 0 && bu.svcOrder.every(function (s) { return /fixed/i.test(bu.svc[s].billing); }); }
   function pricing(w) {
+    if (MODE === "budget" && isFixed(w.budget)) return "Fixed price " + fm(w.ceiling);
     var seen = {}, out = [];
     w.svcs.forEach(function (s) {
       var t = (s.billing && !/time and materials/i.test(s.billing) ? s.billing + " \u00b7 " : "") + fm(s.price) + "/" + (s.unit || "?").toLowerCase();
@@ -272,7 +274,7 @@
   BORDER.forEach(function (b) {
     var bu = BUD[b];
     if (bu.used - bu.billQ >= 1) note("Budget used for '" + b + "' (" + fm(bu.used) + ") is higher than all billable time recorded (" + fm(bu.billQ) + "); check for adjustments or deleted time entries.");
-    if (bu.rev < bu.used - 0.5) note(fm(bu.used - bu.rev) + " of billable time on '" + b + "' exceeds recognised revenue (" + fm(bu.rev) + "); revenue may be capped at the ceiling. Check before invoicing.");
+    if (!isFixed(b) && bu.rev < bu.used - 0.5) note(fm(bu.used - bu.rev) + " of billable time on '" + b + "' exceeds recognised revenue (" + fm(bu.rev) + "); revenue may be capped at the ceiling. Check before invoicing.");
   });
 
   // ---------- invoices ----------
@@ -331,20 +333,29 @@
   BORDER.forEach(function (b) {
     var bu = BUD[b];
     bu.B = bu.billQ; bu.pend = Math.max(0, bu.billQ - bu.used); bu.T = bu.P + bu.E; bu.I = bu.T - bu.PP;
-    bu.NYI = Math.max(0, bu.B - bu.I); bu.ahead = Math.max(0, bu.I - bu.B);
-    bu.K = bu.T + bu.NYI; bu.R = bu.ceiling - bu.K; bu.cons = bu.ceiling > 0 ? bu.K / bu.ceiling : null; bu.st = status(bu.cons);
+    bu.fixed = isFixed(b);
+    if (bu.fixed) {
+      // Fixed price: the customer pays the fixed fee; recorded effort beyond it is Serity's overrun, not billable.
+      bu.NYI = Math.max(0, bu.ceiling - bu.T); bu.ahead = 0; bu.K = Math.max(bu.T, bu.B); bu.earned = Math.min(bu.B, bu.ceiling);
+      if (bu.billQ < 0.005 && bu.T > 0.005) note("Fixed-price budget '" + b + "' has invoices (" + fm(bu.T) + ") but no time recorded in Productive, so delivery effort against the fixed fee cannot be tracked.");
+    } else {
+      bu.NYI = Math.max(0, bu.B - bu.I); bu.ahead = Math.max(0, bu.I - bu.B); bu.K = bu.T + bu.NYI; bu.earned = bu.B;
+    }
+    bu.K = bu.K; bu.R = bu.ceiling - bu.K; bu.cons = bu.ceiling > 0 ? bu.K / bu.ceiling : null; bu.st = status(bu.cons);
   });
   WORDER.forEach(function (k) {
     var w = WS[k], bu = BUD[w.budget];
     if (MODE === "budget") { ["B", "pend", "P", "E", "T", "Dr", "NYI", "K", "R", "cons", "st"].forEach(function (f) { w[f] = bu[f]; }); }
     else { w.B = w.billQ; w.R = w.ceiling - w.B; w.cons = w.ceiling > 0 ? w.B / w.ceiling : null; w.st = status(w.cons); }
-    w.margin = w.B - w.cost; w.mpct = w.B ? w.margin / w.B : null;
+    var earned = MODE === "budget" ? bu.earned : w.B;
+    w.margin = earned - w.cost; w.mpct = earned ? w.margin / earned : null; w.earned = earned;
   });
   var TOT = { ceiling: 0, B: 0, pend: 0, P: 0, E: UNALLOC, Dr: 0, NYI: 0, K: UNALLOC, cost: 0 };
   BORDER.forEach(function (b) { var bu = BUD[b]; TOT.ceiling += bu.ceiling; TOT.B += bu.B; TOT.pend += bu.pend; TOT.P += bu.P; TOT.E += bu.E; TOT.Dr += bu.Dr; TOT.NYI += bu.NYI; TOT.K += bu.K; });
   WORDER.forEach(function (k) { TOT.cost += WS[k].cost; });
   TOT.T = TOT.P + TOT.E; TOT.R = TOT.ceiling - TOT.K; TOT.cons = TOT.ceiling > 0 ? TOT.K / TOT.ceiling : null; TOT.st = status(TOT.cons);
-  TOT.margin = TOT.B - TOT.cost; TOT.mpct = TOT.B ? TOT.margin / TOT.B : null;
+  TOT.earned = 0; WORDER.forEach(function (k) { TOT.earned += WS[k].earned; });
+  TOT.margin = TOT.earned - TOT.cost; TOT.mpct = TOT.earned ? TOT.margin / TOT.earned : null;
 
   // ---------- monthly series ----------
   var asOfMonth = monthKey(asOf), mkeys = Object.keys(MONTHS).filter(function (m) { return m <= asOfMonth; }).sort();
@@ -406,7 +417,8 @@
     var bu = BUD[b], a = bu.T > bu.ceiling + 0.5, bb = !a && bu.T + bu.Dr > bu.ceiling + 0.5, c = !a && bu.K > bu.ceiling + 0.5;
     if (a) task("<b>" + esc(wsName(b)) + ":</b> customer invoiced " + fm(bu.T) + " against a ceiling of " + fm(bu.ceiling) + " (" + fm(bu.T - bu.ceiling) + " over)" + (bu.E ? ", of which external " + fm(bu.E) : "") + ".");
     if (bb) task("<b>" + esc(wsName(b)) + ":</b> finalizing drafts (" + fm(bu.Dr) + ") would breach the ceiling by " + fm(bu.T + bu.Dr - bu.ceiling) + " \u2014 do not finalize without customer approval or a budget change.");
-    if (c) task("<b>" + esc(wsName(b)) + ":</b> billable work not yet invoiced would take the budget " + fm(bu.K - bu.ceiling) + " over the ceiling.");
+    if (c && bu.fixed) task("<b>" + esc(wsName(b)) + " (fixed price):</b> recorded effort of " + fm(bu.B) + " at standard rates exceeds the fixed fee of " + fm(bu.ceiling) + " by " + fm(bu.B - bu.ceiling) + ". The overrun cannot be invoiced; it reduces margin.");
+    else if (c) task("<b>" + esc(wsName(b)) + ":</b> billable work not yet invoiced would take the budget " + fm(bu.K - bu.ceiling) + " over the ceiling.");
     if (!a && !bb && !c && bu.st && bu.st[1] !== "g") task("<b>" + esc(wsName(b)) + "</b> is at " + fp(bu.cons) + " consumption (" + bu.st[0] + ").");
   });
   if (MODE === "service") WORDER.forEach(function (k) { var w = WS[k]; if (w.st && w.st[1] !== "g") task("Service <b>" + esc(w.name) + "</b> has used " + fp(w.cons) + " of its " + fm(w.ceiling) + " budget (" + w.st[0] + ")."); });
@@ -416,7 +428,8 @@
   var lastClosed = (function () { var y = +asOfMonth.slice(0, 4), m = +asOfMonth.slice(5) - 1; if (m < 1) { m = 12; y--; } return y + "-" + ("0" + m).slice(-2); })();
   var li = AX.indexOf(lastClosed), nyiClosed = [];
   if (li >= 0) BORDER.forEach(function (b) {
-    var bu = BUD[b], billClosed = SER[b].bill[li], x = Math.max(0, billClosed - bu.I);
+    var bu = BUD[b]; if (bu.fixed) return;
+    var billClosed = SER[b].bill[li], x = Math.max(0, billClosed - bu.I);
     if (x > 0.5) nyiClosed.push(esc(b) + ": " + fm(x));
   });
   if (nyiClosed.length) task("Billable value from closed months (to end of " + MON[+lastClosed.slice(5) - 1] + " " + lastClosed.slice(0, 4) + ") not yet invoiced:", nyiClosed);
@@ -472,7 +485,7 @@
   h.push(tile("Remaining", fmN(TOT.R), fp(TOT.cons) + " consumed \u00b7 " + stTag(TOT.st)));
   h.push(tile("Unapproved hours", fh(UAT), "of " + fh(monthlyTime) + " recorded" + (TOT.pend > 0.5 ? " \u00b7 " + fm(TOT.pend) + " billable value" : "")));
   h.push("</div>");
-  if (isM) h.push("<div class='tiles t3'>" + tile("Time cost", fm(TOT.cost)) + tile("Margin", fmN(TOT.margin), "Billable value \u2212 time cost") + tile("Margin %", fp(TOT.mpct)) + "</div>");
+  if (isM) h.push("<div class='tiles t3'>" + tile("Time cost", fm(TOT.cost)) + tile("Margin", fmN(TOT.margin), BORDER.some(function (b) { return BUD[b].fixed; }) ? "Earned value (fixed fee capped) \u2212 time cost" : "Billable value \u2212 time cost") + tile("Margin %", fp(TOT.mpct)) + "</div>");
 
   // table 2
   var hasExt = TOT.E > 0.005 || !!EXT;
@@ -489,7 +502,7 @@
   WORDER.forEach(function (k) { var w = WS[k]; h.push(row(w.name, pricing(w), w, MODE === "budget")); });
   if (UNALLOC) h.push(row("Unallocated external invoices", "", { ceiling: 0, B: 0, P: 0, E: UNALLOC, T: UNALLOC, Dr: 0, NYI: 0, K: UNALLOC, R: -UNALLOC, cons: null, st: null, cost: 0, margin: 0, mpct: null }, true));
   h.push(row("Total", "", TOT, true, "tot"));
-  h.push("</tbody></table></div><p class='note'>Committed = total invoiced (Productive + external) + billable value not yet invoiced. Remaining and consumption are measured against Committed." + (MODE === "service" ? " Service rows: consumption = billable value \u00f7 service budget." : "") + "</p>");
+  h.push("</tbody></table></div><p class='note'>Committed = total invoiced (Productive + external) + billable value not yet invoiced. Remaining and consumption are measured against Committed." + (MODE === "service" ? " Service rows: consumption = billable value \u00f7 service budget." : "") + "" + (BORDER.some(function (b) { return BUD[b].fixed; }) ? " Fixed-price budgets: billable value = recorded effort at standard rates; not yet invoiced = fixed fee not yet invoiced; committed = the larger of invoiced and effort; margin uses earned value capped at the fixed fee." : "") + "</p>");
 
   // charts
   var LEG = [["Budget ceiling", COL.ceiling, "dashed"], ["Billable value", COL.billable, "solid"], ["Total invoiced", COL.invoiced, "solid"], ["Committed", COL.committed, "dotted"]].concat(isM ? [["Time cost", COL.cost, "solid"]] : []);
