@@ -1,12 +1,12 @@
 /*!
- * Serity Project Budget & Delivery Report - template v2.1 (budget report)
+ * Serity Project Budget & Delivery Report - template v2.3 (budget report)
  * Renders window.REPORT_DATA (rows copied unchanged from Productive queries) into a fixed report.
  * All parsing, arithmetic, checks and findings happen here. Contains no customer data.
  * Requires Chart.js 4.x loaded before this script.
  */
 (function () {
   "use strict";
-  var VERSION = "2.1", MAJOR = 2;
+  var VERSION = "2.3", MAJOR = 2;
   var COL = { ceiling: "#6B7280", billable: "#2563EB", invoiced: "#059669", committed: "#D97706", cost: "#DC2626", booked: "#6B7280", actual: "#2563EB" };
   var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONFULL = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -67,7 +67,7 @@
   }
 
   // ---------- parsers ----------
-  var CUR = null;
+  var CUR = null, CURS = {}, REPORTING = { monthly: 1, budgets_reporting: 1 };
   function str(v) { return v == null ? "" : String(v).trim(); }
   function money(v, ctx) {
     if (typeof v === "number" && isFinite(v)) return v;
@@ -75,7 +75,7 @@
     if (s === "") return 0;
     var m = s.replace(/[\u00a0\s]/g, " ").match(/^(-?[\d,]*\.?\d+)\s*([A-Z]{3})?$/);
     if (!m) { fail(ctx + ": cannot read money value '" + s + "'."); return 0; }
-    if (m[2]) { if (!CUR) CUR = m[2]; else if (CUR !== m[2]) fail(ctx + ": currency " + m[2] + " differs from " + CUR + "."); }
+    if (m[2]) { var qn = String(ctx).split(" row")[0]; (CURS[m[2]] || (CURS[m[2]] = {}))[qn] = 1; if (!CUR && !REPORTING[qn]) CUR = m[2]; }
     return parseFloat(m[1].replace(/,/g, ""));
   }
   function hours(v, ctx) {
@@ -172,6 +172,7 @@
 
   var S = table("services", ["budget", "service", "total_budget_total", "total_price", "unit", "billing_type"], true);
   var B = table("budgets", ["budget", "total_budget_used", "total_revenue"], true);
+  var BR = table("budgets_reporting", ["budget", "total_budget_used"], true);
   var M = table("monthly", ["budget", "service", "date:month", "total_billable_revenue", "total_time"].concat(VIEW === "M" ? ["total_cost"] : []), true);
   var IF = table("invoices_finalized", ["budget.name", "amount", "invoice.invoiced_on", "date_from", "date_to"], true);
   var ID = table("invoices_draft", ["budget.name", "amount", "invoice.invoiced_on", "date_from", "date_to"], true);
@@ -240,14 +241,31 @@
     if ("total_budget_total" in r) { var tb = money(r.total_budget_total, r._c); if (Math.abs(tb - BUD[b].ceiling) >= 1) note("Service budgets for '" + b + "' add up to " + fm(BUD[b].ceiling) + " but the budget total is " + fm(tb) + "."); }
   });
   BORDER.forEach(function (b) { if (BUD[b].used == null) { note("No budget-used figure was returned for '" + b + "'; it is treated as 0."); BUD[b].used = 0; BUD[b].rev = 0; } });
+  // ---------- exchange rates: reporting currency -> budget currency ----------
+  var RCUR = null, usedRep = {};
+  BR.forEach(function (r) {
+    var b = str(r.budget); if (!knownBudget(b, r._c)) return;
+    usedRep[b] = money(r.total_budget_used, r._c);
+    var mm = str(r.total_budget_used).match(/([A-Z]{3})$/); if (mm) RCUR = mm[1];
+  });
+  BORDER.forEach(function (b) { var bu = BUD[b]; bu.rate = null; if (RCUR === null || RCUR === CUR) bu.rate = 1; else if (bu.used > 0 && usedRep[b] > 0) bu.rate = bu.used / usedRep[b]; });
+  var known = BORDER.filter(function (b) { return BUD[b].rate != null; });
+  BORDER.forEach(function (b) {
+    var bu = BUD[b]; if (bu.rate != null) return;
+    if (known.length) { var s = 0; known.forEach(function (k) { s += BUD[k].rate; }); bu.rate = s / known.length; bu.rateBorrowed = true; }
+  });
+  var RATES = BORDER.filter(function (b) { return BUD[b].rate != null && BUD[b].rate !== 1; });
+  if (RCUR && RCUR !== CUR && RATES.length) note("Monthly figures (billable value" + (VIEW === "M" ? ", time cost" : "") + ") arrive in " + RCUR + " and were converted to " + CUR + " at the rate implied by Productive's budget-used figures: " +
+    RATES.map(function (b) { return b + " 1 " + RCUR + " = " + BUD[b].rate.toFixed(4) + " " + CUR + (BUD[b].rateBorrowed ? " (average of the other budgets; this budget has no budget used yet)" : ""); }).join("; ") + ". Ceilings, invoices and budget used are exact.");
 
   var MONTHS = {};
   M.forEach(function (r) {
     var b = str(r.budget), k = wsKey(b, str(r.service), r._c); if (!k) return;
     var mk = monthOf(r["date:month"], r._c); if (!mk) return;
-    var bill = money(r.total_billable_revenue, r._c), t = hours(r.total_time, r._c), w = WS[k];
+    var rate = BUD[b].rate; if (rate == null) { fail("Cannot determine the " + RCUR + "\u2192" + CUR + " rate for budget '" + b + "': no budget-used figure in either currency."); rate = 1; }
+    var bill = money(r.total_billable_revenue, r._c) * rate, t = hours(r.total_time, r._c), w = WS[k];
     w.billM[mk] = (w.billM[mk] || 0) + bill; w.billQ += bill; w.timeQ += t; BUD[b].billQ += bill;
-    if (VIEW === "M") { var c = money(r.total_cost, r._c); w.costM[mk] = (w.costM[mk] || 0) + c; w.cost += c; }
+    if (VIEW === "M") { var c = money(r.total_cost, r._c) * rate; w.costM[mk] = (w.costM[mk] || 0) + c; w.cost += c; }
     if ((t > 0 || bill > 0) && (!BUD[b].first || mk < BUD[b].first)) BUD[b].first = mk;
     MONTHS[mk] = 1;
   });
@@ -369,6 +387,14 @@
   });
   if (Math.abs(REC - monthlyTime) >= 1) note("Time by approval status adds up to " + fh(REC) + ", but the monthly time adds up to " + fh(monthlyTime) + ".");
 
+  var natC = {}, repC = {};
+  Object.keys(CURS).forEach(function (c) { Object.keys(CURS[c]).forEach(function (q) { (REPORTING[q] ? repC : natC)[c] = (REPORTING[q] ? repC : natC)[c] || []; (REPORTING[q] ? repC : natC)[c].push(q); }); });
+  [[natC, "budget-currency queries (services, budgets, invoices)"], [repC, "reporting-currency queries (monthly, budgets_reporting)"]].forEach(function (x) {
+    var cs = Object.keys(x[0]);
+    if (cs.length > 1) fail("The " + x[1] + " return more than one currency (" + cs.map(function (c) { return c + ": " + x[0][c].join(", "); }).join("; ") + "). Check their currency_variant settings.");
+  });
+  Object.keys(repC).forEach(function (c) { if (c !== CUR && RCUR !== c) fail("Monthly figures are in " + c + " but no " + c + "\u2192" + CUR + " rate could be derived from budgets_reporting."); });
+
   if (errors.length) { showErrors(); return; }
 
   // ---------- data quality and tasks ----------
@@ -418,7 +444,7 @@
   });
   // 8 unapproved
   var UAL = Object.keys(UA).filter(function (n) { return UA[n] > 0.12; }).sort(function (a, b) { return UA[b] - UA[a]; });
-  if (UAT > 0.12) task(fh(UAT) + " of recorded time is not yet approved (unapproved, submitted, unsubmitted or rejected) \u2014 approve before relying on budget used:", UAL.map(function (n) { return esc(n) + ": " + fh(UA[n]); }));
+  if (UAT > 0.12) task(fh(UAT) + " of recorded time is not yet approved (unapproved, submitted, unsubmitted or rejected) \u2014 approve so that Productive\u2019s budget used catches up:", UAL.map(function (n) { return esc(n) + ": " + fh(UA[n]); }));
   // 9 data notes
   if (MODE === "service") note("This project has one budget, so workstreams are its services. Invoices are recorded per budget, so invoicing columns are shown on the total row only.");
   if (notes.length) task("Data notes:", notes.map(esc));
