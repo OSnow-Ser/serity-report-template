@@ -1,12 +1,12 @@
 /*!
- * Serity Project Budget & Delivery Report - template v1.0
+ * Serity Project Budget & Delivery Report - template v1.1
  * Renders window.REPORT_DATA (rows copied unchanged from Productive queries) into a fixed report.
  * All parsing, arithmetic, checks and findings happen here. Contains no customer data.
  * Requires Chart.js 4.x loaded before this script.
  */
 (function () {
   "use strict";
-  var VERSION = "1.0", MAJOR = 1;
+  var VERSION = "1.1", MAJOR = 1;
   var COL = { ceiling: "#6B7280", billable: "#2563EB", invoiced: "#059669", committed: "#D97706", cost: "#DC2626", booked: "#6B7280", actual: "#2563EB" };
   var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONFULL = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -179,6 +179,14 @@
   var BT = table("bookings_tentative", ["budget", "person", "service", "date:week", "time", "person.placeholder"], false);
   var TW = table("time_weekly", ["budget", "person", "service", "date:week", "total_time", "total_billable_time"], true);
   var TS = table("time_status", ["person", "status", "total_time"], false);
+  // Completeness check: every query's row count must match the count Productive reported.
+  var RC = D.row_counts;
+  if (!RC || typeof RC !== "object") fail("row_counts is missing: report the number of rows Productive returned for each query.");
+  else Object.keys(Q).forEach(function (n) {
+    if (!Q[n] || !Array.isArray(Q[n].rows)) return;
+    if (RC[n] == null) fail("row_counts has no entry for query '" + n + "'.");
+    else if (+RC[n] !== Q[n].rows.length) fail("Query '" + n + "': " + Q[n].rows.length + " rows were copied, but Productive returned " + RC[n] + ". Rows are missing or were added; run again.");
+  });
   var P = D.project || {};
   if (!str(P.name)) fail("project.name is missing.");
   var asOfStr = str(D.as_of), asOf = dateOf(asOfStr.slice(0, 10), "as_of");
@@ -387,6 +395,9 @@
   var H = { booked: 0, actual: 0, billable: 0, unappr: 0, unbooked: 0 };
   PL.forEach(function (p) { H.booked += p.booked; H.actual += p.actual; H.billable += p.billable; H.unappr += p.unappr || 0; H.unbooked += p.unbooked; });
   H.var = H.actual - H.booked; H.varp = H.booked ? H.var / H.booked : null;
+  var monthlyTime = 0; WORDER.forEach(function (k) { monthlyTime += WS[k].timeQ; });
+  if (monthlyTime > 0.5 && !TW.length) fail("time_weekly is empty, but the monthly query shows " + fh(monthlyTime) + " recorded. The weekly time query was skipped or its rows were left out.");
+  if (TW.length && !BC.length) note("No confirmed bookings were returned for this project, so booked hours are 0 and all recorded time counts as unbooked.");
   var unassignedTotal = 0; Object.keys(UNASSIGNED).forEach(function (s) { unassignedTotal += UNASSIGNED[s]; });
 
   // weekly axis: last 26 weeks up to the current week

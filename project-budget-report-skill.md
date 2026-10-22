@@ -30,6 +30,8 @@ Fetch all pages: repeat with `offset` + 200 until a page returns fewer than 200 
 
 For each query, keep only the columns listed under "Copy columns", in that order.
 
+**Run every query, and copy every row.** Never skip a query or leave its rows empty because the output would be long. Record the number of rows Productive returned for each query (e.g. "175 of 175") for `row_counts`. If the complete data block would be too long to output, say so and stop. Never shorten it.
+
 | Key | Query | Copy columns |
 |---|---|---|
 | `services` | Q1 | budget, responsible, service, total_budget_total, total_price, unit, billing_type |
@@ -86,18 +88,24 @@ Fill `invoice_reference` with the invoice's visible reference (e.g. `#1521694`, 
    > No finalized invoices were found in Productive for: <budget — budget used — number and total of drafts, one per line>.
    > Were invoices issued from another system? If so, give for each invoice: number, issue date, service period, net amount, budget, and the source system. Reply "none" to continue without them.
 
-3. Record the supplied invoices as given. Write dates as YYYY-MM-DD and amounts as plain numbers. If an invoice has no service period, leave those fields `null`.
-4. Do not ask any other questions.
+3. **Accept the invoice list in any layout.** This includes tables, lists, invoices grouped under budget headings, extra columns, or a list pasted earlier in the chat. The reply "I answered above" means: use the earlier list. Treat any invoice list from the user as the answer; do not ask again.
+   - **Budget:** take it from the row, or from the heading the row sits under. Match it to the budget names from Q1, ignoring case, dashes and spacing (e.g. "MEWA – Privacy" = "MEWA - Privacy"). If a budget can't be matched, keep the name the user gave; the template will flag it.
+   - **Amount:** use the **net** amount. Ignore gross amounts and totals rows.
+   - **Dates:** write them as YYYY-MM-DD. Read 14.09.2026 as day.month.year.
+   - **Service period:** a month such as "Aug 2026" becomes `service_from` 2026-08-01 and `service_to` 2026-08-31. If there is no service period, set both to `null`.
+   - **Source system:** if it isn't stated, set `"source": null`. The report will flag it.
+4. Never stop because the list is incomplete or in an unexpected layout. Record what was given, set anything missing to `null`, and continue. Do not ask any other questions.
 
 ## 5. Build the data block
 
 ```json
 {
-  "template": "1.0",
+  "template": "1.1",
   "view": "Management | PM",
   "as_of": "<current date and time, Europe/Berlin, e.g. 2026-10-22T14:05:00+02:00>",
   "project": {"name": "<project name>", "customer": "<company.name>", "project_manager": "<first last>", "timezone": "Europe/Berlin"},
   "thresholds": {"monitor": 50, "critical": 80},
+  "row_counts": {"services": 9, "budgets": 5, "...": "one entry per query key: the row count Productive reported"},
   "queries": {
     "services": {"cols": ["budget", "..."], "rows": [["MEWA - AI Governance", "..."], ["..."]]},
     "...": "one entry per key in section 3"
@@ -120,7 +128,7 @@ Create an **in-chat HTML artifact** containing exactly the code below, with the 
 <div id="report"></div>
 <script>window.REPORT_DATA = DATA_BLOCK;</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/OSnow-Ser/serity-report-template@v1.0/report-template.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/OSnow-Ser/serity-report-template@v1.1/report-template.js"></script>
 ```
 
 After the artifact, reply with one line: the view and the project name.
