@@ -1,12 +1,12 @@
 /*!
- * Serity Project Budget & Delivery Report - template v1.1
+ * Serity Project Budget & Delivery Report - template v2.1 (budget report)
  * Renders window.REPORT_DATA (rows copied unchanged from Productive queries) into a fixed report.
  * All parsing, arithmetic, checks and findings happen here. Contains no customer data.
  * Requires Chart.js 4.x loaded before this script.
  */
 (function () {
   "use strict";
-  var VERSION = "1.1", MAJOR = 1;
+  var VERSION = "2.1", MAJOR = 2;
   var COL = { ceiling: "#6B7280", billable: "#2563EB", invoiced: "#059669", committed: "#D97706", cost: "#DC2626", booked: "#6B7280", actual: "#2563EB" };
   var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONFULL = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -61,7 +61,7 @@
   function note(m) { if (notes.indexOf(m) < 0) notes.push(m); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function showErrors() {
-    root.innerHTML = '<div class="ey">Project Budget &amp; Delivery Report \u00b7 template v' + VERSION + '</div>' +
+    root.innerHTML = '<div class="ey">Project Budget Report \u00b7 template v' + VERSION + '</div>' +
       '<div class="err"><strong>Report not rendered \u2014 the data failed ' + errors.length + ' check(s). Fix the data and run again.</strong><ul>' +
       errors.map(function (e) { return "<li>" + esc(e) + "</li>"; }).join("") + "</ul></div>";
   }
@@ -175,10 +175,8 @@
   var M = table("monthly", ["budget", "service", "date:month", "total_billable_revenue", "total_time"].concat(VIEW === "M" ? ["total_cost"] : []), true);
   var IF = table("invoices_finalized", ["budget.name", "amount", "invoice.invoiced_on", "date_from", "date_to"], true);
   var ID = table("invoices_draft", ["budget.name", "amount", "invoice.invoiced_on", "date_from", "date_to"], true);
-  var BC = table("bookings_confirmed", ["budget", "person", "service", "date:week", "time", "person.placeholder"], true);
-  var BT = table("bookings_tentative", ["budget", "person", "service", "date:week", "time", "person.placeholder"], false);
-  var TW = table("time_weekly", ["budget", "person", "service", "date:week", "total_time", "total_billable_time"], true);
-  var TS = table("time_status", ["person", "status", "total_time"], false);
+  var TS = table("time_status", ["person", "status", "total_time"], true);
+  if (D.report && D.report !== "budget") fail("This template renders the budget report; report '" + D.report + "' is not supported.");
   // Completeness check: every query's row count must match the count Productive reported.
   var RC = D.row_counts;
   if (!RC || typeof RC !== "object") fail("row_counts is missing: report the number of rows Productive returned for each query.");
@@ -255,7 +253,7 @@
   });
   BORDER.forEach(function (b) {
     var bu = BUD[b];
-    if (Math.abs(bu.billQ - bu.used) >= 1) note("Monthly billable revenue for '" + b + "' adds up to " + fm(bu.billQ) + ", but budget used is " + fm(bu.used) + " (difference " + fm(bu.used - bu.billQ) + "). Tables use budget used; charts use the monthly figures.");
+    if (bu.used - bu.billQ >= 1) note("Budget used for '" + b + "' (" + fm(bu.used) + ") is higher than all billable time recorded (" + fm(bu.billQ) + "); check for adjustments or deleted time entries.");
     if (bu.rev < bu.used - 0.5) note(fm(bu.used - bu.rev) + " of billable time on '" + b + "' exceeds recognised revenue (" + fm(bu.rev) + "); revenue may be capped at the ceiling. Check before invoicing.");
   });
 
@@ -314,18 +312,18 @@
   });
   BORDER.forEach(function (b) {
     var bu = BUD[b];
-    bu.B = bu.used; bu.T = bu.P + bu.E; bu.I = bu.T - bu.PP;
+    bu.B = bu.billQ; bu.pend = Math.max(0, bu.billQ - bu.used); bu.T = bu.P + bu.E; bu.I = bu.T - bu.PP;
     bu.NYI = Math.max(0, bu.B - bu.I); bu.ahead = Math.max(0, bu.I - bu.B);
     bu.K = bu.T + bu.NYI; bu.R = bu.ceiling - bu.K; bu.cons = bu.ceiling > 0 ? bu.K / bu.ceiling : null; bu.st = status(bu.cons);
   });
   WORDER.forEach(function (k) {
     var w = WS[k], bu = BUD[w.budget];
-    if (MODE === "budget") { ["B", "P", "E", "T", "Dr", "NYI", "K", "R", "cons", "st"].forEach(function (f) { w[f] = bu[f]; }); }
+    if (MODE === "budget") { ["B", "pend", "P", "E", "T", "Dr", "NYI", "K", "R", "cons", "st"].forEach(function (f) { w[f] = bu[f]; }); }
     else { w.B = w.billQ; w.R = w.ceiling - w.B; w.cons = w.ceiling > 0 ? w.B / w.ceiling : null; w.st = status(w.cons); }
     w.margin = w.B - w.cost; w.mpct = w.B ? w.margin / w.B : null;
   });
-  var TOT = { ceiling: 0, B: 0, P: 0, E: UNALLOC, Dr: 0, NYI: 0, K: UNALLOC, cost: 0 };
-  BORDER.forEach(function (b) { var bu = BUD[b]; TOT.ceiling += bu.ceiling; TOT.B += bu.B; TOT.P += bu.P; TOT.E += bu.E; TOT.Dr += bu.Dr; TOT.NYI += bu.NYI; TOT.K += bu.K; });
+  var TOT = { ceiling: 0, B: 0, pend: 0, P: 0, E: UNALLOC, Dr: 0, NYI: 0, K: UNALLOC, cost: 0 };
+  BORDER.forEach(function (b) { var bu = BUD[b]; TOT.ceiling += bu.ceiling; TOT.B += bu.B; TOT.pend += bu.pend; TOT.P += bu.P; TOT.E += bu.E; TOT.Dr += bu.Dr; TOT.NYI += bu.NYI; TOT.K += bu.K; });
   WORDER.forEach(function (k) { TOT.cost += WS[k].cost; });
   TOT.T = TOT.P + TOT.E; TOT.R = TOT.ceiling - TOT.K; TOT.cons = TOT.ceiling > 0 ? TOT.K / TOT.ceiling : null; TOT.st = status(TOT.cons);
   TOT.margin = TOT.B - TOT.cost; TOT.mpct = TOT.B ? TOT.margin / TOT.B : null;
@@ -359,51 +357,17 @@
   BORDER.forEach(function (b) { ["bill", "inv", "cost", "comm"].forEach(function (f) { mono(SER[b][f], b + " / " + f); }); });
   ["bill", "inv", "cost", "comm"].forEach(function (f) { mono(PROG[f], "Programme / " + f); });
 
-  // ---------- delivery ----------
-  var asOfMon = mondayOf(asOf), PEOPLE = {}, WP = {}, UNASSIGNED = {}, futureBooked = 0, tentPast = 0, tentFuture = 0;
-  function person(n) { return PEOPLE[n] || (PEOPLE[n] = { name: n, booked: 0, actual: 0, billable: 0, unappr: null, wk: {} }); }
-  function wperson(k, n) { var id = k + "\u0001" + n; return WP[id] || (WP[id] = { ws: k, name: n, booked: 0, actual: 0, billable: 0, wk: {} }); }
-  function wk(o, t) { return o.wk[t] || (o.wk[t] = { b: 0, a: 0 }); }
-  BC.forEach(function (r) {
-    var k = wsKey(str(r.budget), str(r.service), r._c), t = weekOf(r["date:week"], r._c), h = hours(r.time, r._c); if (!k || t == null) return;
-    if (t > asOfMon) { futureBooked += h; return; }
-    if (yes(r["person.placeholder"])) { var sn = str(r.service) || "Unspecified"; UNASSIGNED[sn] = (UNASSIGNED[sn] || 0) + h; return; }
-    var p = person(str(r.person)), q = wperson(k, str(r.person));
-    p.booked += h; wk(p, t).b += h; q.booked += h; wk(q, t).b += h;
-  });
-  (BT || []).forEach(function (r) { var t = weekOf(r["date:week"], r._c), h = hours(r.time, r._c); if (t == null) return; if (t > asOfMon) tentFuture += h; else tentPast += h; });
-  TW.forEach(function (r) {
-    var k = wsKey(str(r.budget), str(r.service), r._c), t = weekOf(r["date:week"], r._c); if (!k || t == null) return;
-    var a = hours(r.total_time, r._c), bl = hours(r.total_billable_time, r._c), p = person(str(r.person)), q = wperson(k, str(r.person));
-    p.actual += a; p.billable += bl; wk(p, t).a += a; q.actual += a; q.billable += bl; wk(q, t).a += a;
-  });
+  // ---------- approval status ----------
   var OPEN = { unapproved: 1, rejected: 1, submitted: 1, unsubmitted: 1 }, DONE = { approved: 1, "auto-approved": 1, "auto approved": 1, autoapproved: 1 };
-  if (TS) {
-    Object.keys(PEOPLE).forEach(function (n) { PEOPLE[n].unappr = 0; });
-    TS.forEach(function (r) {
-      var s = str(r.status).toLowerCase(), h = hours(r.total_time, r._c);
-      if (OPEN[s]) person(str(r.person)).unappr = (person(str(r.person)).unappr || 0) + h;
-      else if (!DONE[s]) note("Unknown time-entry status '" + str(r.status) + "' (" + fh(h) + ") was not counted as unapproved.");
-    });
-  } else note("Approval status was not supplied; unapproved hours are not shown.");
-  function fin(o) {
-    o.var = o.actual - o.booked; o.varp = o.booked > 0 ? o.var / o.booked : null; o.unbooked = 0;
-    Object.keys(o.wk).forEach(function (t) { if (o.wk[t].b <= 0.0001) o.unbooked += o.wk[t].a; });
-  }
-  var PL = Object.keys(PEOPLE).map(function (n) { fin(PEOPLE[n]); return PEOPLE[n]; }).sort(function (a, b) { return Math.abs(b.var) - Math.abs(a.var) || a.name.localeCompare(b.name); });
-  var WPL = Object.keys(WP).map(function (id) { fin(WP[id]); return WP[id]; }).sort(function (a, b) { return WORDER.indexOf(a.ws) - WORDER.indexOf(b.ws) || Math.abs(b.var) - Math.abs(a.var); });
-  var H = { booked: 0, actual: 0, billable: 0, unappr: 0, unbooked: 0 };
-  PL.forEach(function (p) { H.booked += p.booked; H.actual += p.actual; H.billable += p.billable; H.unappr += p.unappr || 0; H.unbooked += p.unbooked; });
-  H.var = H.actual - H.booked; H.varp = H.booked ? H.var / H.booked : null;
-  var monthlyTime = 0; WORDER.forEach(function (k) { monthlyTime += WS[k].timeQ; });
-  if (monthlyTime > 0.5 && !TW.length) fail("time_weekly is empty, but the monthly query shows " + fh(monthlyTime) + " recorded. The weekly time query was skipped or its rows were left out.");
-  if (TW.length && !BC.length) note("No confirmed bookings were returned for this project, so booked hours are 0 and all recorded time counts as unbooked.");
-  var unassignedTotal = 0; Object.keys(UNASSIGNED).forEach(function (s) { unassignedTotal += UNASSIGNED[s]; });
-
-  // weekly axis: last 26 weeks up to the current week
-  var firstWk = null; PL.forEach(function (p) { Object.keys(p.wk).forEach(function (t) { t = +t; if (firstWk == null || t < firstWk) firstWk = t; }); });
-  var WAX = []; var startW = Math.max(firstWk == null ? asOfMon : firstWk, asOfMon - 25 * 7 * 864e5);
-  for (var tw = startW; tw <= asOfMon; tw += 7 * 864e5) WAX.push(tw);
+  var UA = {}, UAT = 0, REC = 0, monthlyTime = 0;
+  WORDER.forEach(function (k) { monthlyTime += WS[k].timeQ; });
+  TS.forEach(function (r) {
+    var s = str(r.status).toLowerCase(), h = hours(r.total_time, r._c), n = str(r.person);
+    REC += h;
+    if (OPEN[s]) { UA[n] = (UA[n] || 0) + h; UAT += h; }
+    else if (!DONE[s]) note("Unknown time-entry status '" + str(r.status) + "' (" + fh(h) + ") was not counted as unapproved.");
+  });
+  if (Math.abs(REC - monthlyTime) >= 1) note("Time by approval status adds up to " + fh(REC) + ", but the monthly time adds up to " + fh(monthlyTime) + ".");
 
   if (errors.length) { showErrors(); return; }
 
@@ -453,18 +417,9 @@
     });
   });
   // 8 unapproved
-  if (TS && H.unappr > 0.12) task(fh(H.unappr) + " of time is not yet approved:", PL.filter(function (p) { return (p.unappr || 0) > 0.12; }).map(function (p) { return esc(p.name) + ": " + fh(p.unappr); }));
-  // 9 variance
-  var over = PL.filter(function (p) { return p.varp != null && p.varp >= 0.2 && p.var >= 8; }), under = PL.filter(function (p) { return p.varp != null && p.varp <= -0.2 && p.var <= -8; });
-  if (over.length) task("Over plan (actual above confirmed bookings by \u2265 20% and \u2265 8 h):", over.map(function (p) { return esc(p.name) + ": " + fhs(p.var) + " (" + fp(p.varp) + ")"; }));
-  if (under.length) task("Under plan (actual below confirmed bookings by \u2265 20% and \u2265 8 h):", under.map(function (p) { return esc(p.name) + ": " + fhs(p.var) + " (" + fp(p.varp) + ")"; }));
-  // 10 unbooked actuals
-  var ub = PL.filter(function (p) { return p.unbooked > 0.12; });
-  if (ub.length) task("Unbooked actuals (time recorded in weeks with no confirmed booking):", ub.map(function (p) { return esc(p.name) + ": " + fh(p.unbooked); }));
-  // 11 data notes
-  if (tentPast + tentFuture > 0.12) note("Tentative bookings are excluded from booked hours: " + fh(tentPast) + " to date, " + fh(tentFuture) + " in future weeks.");
-  if (futureBooked > 0.12) note("Confirmed bookings in future weeks (" + fh(futureBooked) + ") are excluded from booked hours.");
-  if (unassignedTotal > 0.12) note("Unassigned (placeholder) booked hours to date: " + Object.keys(UNASSIGNED).map(function (s) { return s + " " + fh(UNASSIGNED[s]); }).join("; ") + ". These are not in the consultant tables.");
+  var UAL = Object.keys(UA).filter(function (n) { return UA[n] > 0.12; }).sort(function (a, b) { return UA[b] - UA[a]; });
+  if (UAT > 0.12) task(fh(UAT) + " of recorded time is not yet approved (unapproved, submitted, unsubmitted or rejected) \u2014 approve before relying on budget used:", UAL.map(function (n) { return esc(n) + ": " + fh(UA[n]); }));
+  // 9 data notes
   if (MODE === "service") note("This project has one budget, so workstreams are its services. Invoices are recorded per budget, so invoicing columns are shown on the total row only.");
   if (notes.length) task("Data notes:", notes.map(esc));
 
@@ -475,7 +430,7 @@
   var scope = isM ? "Management view \u2014 CONFIDENTIAL: contains internal cost and margin" : "Project Manager view \u2014 internal cost and profitability excluded";
   var owners = {}; BORDER.forEach(function (b) { if (BUD[b].owner) owners[BUD[b].owner] = 1; });
   var tStr = asOfStr.length > 10 ? asOfStr.slice(11, 16) : "";
-  h.push('<div class="ey">Project Budget &amp; Delivery Report</div>');
+  h.push('<div class="ey">Project Budget Report</div>');
   h.push("<h1>" + esc((P.customer ? P.customer + " \u2013 " : "") + P.name) + "</h1>");
   h.push('<div class="scope ' + (isM ? "m" : "p") + '">' + esc(scope) + "</div>");
   h.push('<div class="meta"><span><b>Period:</b> ' + monthLabel(AX[0]).replace(/ (\d\d)$/, " 20$1") + " \u2013 " + fd(asOf) + "</span><span><b>Data as of:</b> " + fd(asOf) + (tStr ? ", " + tStr : "") + " " + esc(P.timezone || "Europe/Berlin") + "</span><span><b>Project manager:</b> " + esc(P.project_manager || "\u2014") + "</span><span><b>Budget owner(s):</b> " + esc(Object.keys(owners).join(", ") || "\u2014") + "</span><span><b>Currency:</b> " + esc(CUR || "\u2014") + "</span></div>");
@@ -486,18 +441,18 @@
   h.push("<h2>Key figures</h2><div class='tiles'>");
   h.push(tile("Budget ceiling", fm(TOT.ceiling), BORDER.length + " budget" + (BORDER.length > 1 ? "s" : "")));
   h.push(tile("Total invoiced", fm(TOT.T), TOT.E ? "of which external " + fm(TOT.E) : "Finalized Productive invoices"));
-  h.push(tile("Not yet invoiced", fm(TOT.NYI), "Billable value not yet invoiced"));
+  h.push(tile("Not yet invoiced", fm(TOT.NYI), TOT.pend > 0.5 ? "incl. " + fm(TOT.pend) + " awaiting time approval" : "Billable value not yet invoiced"));
   h.push(tile("Committed", fm(TOT.K), "Invoiced + not yet invoiced"));
   h.push(tile("Remaining", fmN(TOT.R), fp(TOT.cons) + " consumed \u00b7 " + stTag(TOT.st)));
-  h.push(tile("Hours: actual vs booked", fh(H.actual) + " / " + fh(H.booked), "Variance " + fhs(H.var) + (H.varp != null ? " (" + fp(H.varp) + ")" : "")));
+  h.push(tile("Unapproved hours", fh(UAT), "of " + fh(monthlyTime) + " recorded" + (TOT.pend > 0.5 ? " \u00b7 " + fm(TOT.pend) + " billable value" : "")));
   h.push("</div>");
   if (isM) h.push("<div class='tiles t3'>" + tile("Time cost", fm(TOT.cost)) + tile("Margin", fmN(TOT.margin), "Billable value \u2212 time cost") + tile("Margin %", fp(TOT.mpct)) + "</div>");
 
   // table 2
   var hasExt = TOT.E > 0.005 || !!EXT;
-  var cols = ["Workstream", "Pricing", "Budget ceiling", "Billable value", "Productive invoiced"].concat(hasExt ? ["External invoiced"] : []).concat(["Total invoiced", "Draft invoices", "Not yet invoiced", "Committed", "Remaining", "Consumption", "Status"]).concat(isM ? ["Time cost", "Margin", "Margin %"] : []);
+  var cols = ["Workstream", "Pricing", "Budget ceiling", "Billable value", "Awaiting approval", "Productive invoiced"].concat(hasExt ? ["External invoiced"] : []).concat(["Total invoiced", "Draft invoices", "Not yet invoiced", "Committed", "Remaining", "Consumption", "Status"]).concat(isM ? ["Time cost", "Margin", "Margin %"] : []);
   function row(name, pr, o, inv, cls) {
-    var d = [esc(name), '<span style="white-space:normal">' + esc(pr) + "</span>", fm(o.ceiling), fm(o.B)];
+    var d = [esc(name), '<span style="white-space:normal">' + esc(pr) + "</span>", fm(o.ceiling), fm(o.B), o.pend == null ? "\u2014" : fm(o.pend)];
     var dash = "\u2014";
     d.push(inv ? fm(o.P) : dash); if (hasExt) d.push(inv ? fm(o.E) : dash);
     d.push(inv ? fm(o.T) : dash, inv ? fm(o.Dr) : dash, inv ? fm(o.NYI) : dash, inv ? fm(o.K) : dash, fmN(o.R), fp(o.cons), stTag(o.st));
@@ -528,20 +483,6 @@
   });
   h.push("</div>");
 
-  // delivery
-  h.push("<h2>Delivery by consultant</h2><div class='tw'><table><thead><tr><th>Consultant</th><th>Booked</th><th>Actual</th><th>Billable</th><th>Non-billable</th><th>Variance</th><th>Variance %</th><th>Unbooked actuals</th><th>Unapproved</th></tr></thead><tbody>");
-  PL.forEach(function (p) { h.push("<tr><td>" + esc(p.name) + "</td><td>" + fh(p.booked) + "</td><td>" + fh(p.actual) + "</td><td>" + fh(p.billable) + "</td><td>" + fh(p.actual - p.billable) + "</td><td>" + fhs(p.var) + "</td><td>" + fp(p.varp) + "</td><td>" + fh(p.unbooked) + "</td><td>" + (p.unappr == null ? "\u2014" : fh(p.unappr)) + "</td></tr>"); });
-  h.push("<tr class='tot'><td>Total</td><td>" + fh(H.booked) + "</td><td>" + fh(H.actual) + "</td><td>" + fh(H.billable) + "</td><td>" + fh(H.actual - H.billable) + "</td><td>" + fhs(H.var) + "</td><td>" + fp(H.varp) + "</td><td>" + fh(H.unbooked) + "</td><td>" + (TS ? fh(H.unappr) : "\u2014") + "</td></tr>");
-  h.push("</tbody></table></div><p class='note'>Booked = confirmed bookings for named people in weeks up to " + fd(asOf) + ". Variance = actual \u2212 booked. Unbooked actuals = time recorded in weeks with no confirmed booking for that person.</p>");
-  if (WORDER.length > 1) {
-    h.push("<h3 style='margin-top:18px'>Consultant \u00d7 workstream</h3><div class='tw'><table><thead><tr><th>Workstream</th><th>Consultant</th><th>Booked</th><th>Actual</th><th>Billable</th><th>Non-billable</th><th>Variance</th><th>Variance %</th><th>Unbooked actuals</th></tr></thead><tbody>");
-    WPL.forEach(function (p) { h.push("<tr><td>" + esc(WS[p.ws].name) + "</td><td class='l'>" + esc(p.name) + "</td><td>" + fh(p.booked) + "</td><td>" + fh(p.actual) + "</td><td>" + fh(p.billable) + "</td><td>" + fh(p.actual - p.billable) + "</td><td>" + fhs(p.var) + "</td><td>" + fp(p.varp) + "</td><td>" + fh(p.unbooked) + "</td></tr>"); });
-    h.push("</tbody></table></div>");
-  }
-  h.push("<h3 style='margin-top:18px'>Weekly booked vs actual hours</h3><div class='legend'><span><i style='border-top-color:" + COL.booked + ";border-top-style:dashed'></i>Booked hours (confirmed)</span><span><i style='border-top-color:" + COL.actual + "'></i>Actual hours</span><span>\u25b2 current week (in progress)</span></div><div class='grid2'>");
-  PL.forEach(function (p, i) { h.push(chartBox("c_p" + i, p.name)); });
-  h.push("</div>");
-
   // register
   var RS = REG.slice().sort(function (a, b) { return (a.issue || 0) - (b.issue || 0); });
   h.push("<h2>Invoice register</h2><div class='tw'><table><thead><tr><th>Number</th><th class='l'>Issue date</th><th class='l'>Status</th><th class='l'>Source</th><th class='l'>Budget</th><th class='l'>Service period</th><th>Net amount</th></tr></thead><tbody>");
@@ -556,8 +497,8 @@
 
   // footer
   h.push("<footer><p><b>Scope:</b> " + esc(scope) + ".</p>");
-  h.push("<p><b>Definitions:</b> Billable value = Productive budget used. Total invoiced = finalized Productive invoices + external invoices (drafts excluded). Committed = total invoiced + billable value not yet invoiced. Booked hours = confirmed bookings for named people up to the as-of date (tentative, absence, placeholder and future bookings excluded).</p>");
-  h.push("<p><b>Sources:</b> Productive service, budget, time-entry, invoice-attribution and booking reports" + (EXT ? "; external invoices from " + esc(EXTSRC) : "") + ". Data as of " + fd(asOf) + (tStr ? ", " + tStr : "") + ". Template v" + VERSION + ".</p></footer>");
+  h.push("<p><b>Definitions:</b> Billable value = all billable time recorded in Productive, approved or not (Productive\u2019s budget used counts approved time only; the difference is shown as awaiting approval). Total invoiced = finalized Productive invoices + external invoices (drafts excluded). Committed = total invoiced + billable value not yet invoiced.</p>");
+  h.push("<p><b>Sources:</b> Productive service, budget, time-entry, and invoice-attribution reports" + (EXT ? "; external invoices from " + esc(EXTSRC) : "") + ". Data as of " + fd(asOf) + (tStr ? ", " + tStr : "") + ". Template v" + VERSION + ".</p></footer>");
   root.innerHTML = h.join("");
 
   // ---------- charts ----------
@@ -578,13 +519,5 @@
     if (isM) ds.push({ label: "Time cost", data: s.cost, borderColor: COL.cost, backgroundColor: COL.cost, borderWidth: 2, pointRadius: 2 });
     var o = base(tipMoney); o.scales.y.ticks = { callback: function (v) { return fm(v); } };
     new Chart(document.getElementById(c[0]), { type: "line", data: { labels: AX.map(monthLabel), datasets: ds }, options: o });
-  });
-  var tipH = { callbacks: { label: function (x) { return x.dataset.label + ": " + fh(x.parsed.y); } } };
-  PL.forEach(function (p, i) {
-    var cur = WAX.length - 1, o = base(tipH);
-    new Chart(document.getElementById("c_p" + i), { type: "line", data: { labels: WAX.map(weekLabel), datasets: [
-      { label: "Booked", data: WAX.map(function (t) { return p.wk[t] ? p.wk[t].b : 0; }), borderColor: COL.booked, borderDash: [6, 5], borderWidth: 2, pointRadius: 0 },
-      { label: "Actual", data: WAX.map(function (t) { return p.wk[t] ? p.wk[t].a : 0; }), borderColor: COL.actual, backgroundColor: COL.actual, borderWidth: 2.5,
-        pointStyle: WAX.map(function (t, j) { return j === cur ? "triangle" : "circle"; }), pointRadius: WAX.map(function (t, j) { return j === cur ? 6 : 2; }) }] }, options: o });
   });
 })();

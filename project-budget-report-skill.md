@@ -1,6 +1,6 @@
-# Project Budget & Delivery Report
+# Project Budget Report
 
-Produces a fixed-format budget, billing and delivery report for one Productive project.
+Produces a fixed-format report on budget consumption, billing and invoicing per workstream, for one Productive project. It does not cover resourcing (bookings vs hours worked); that is a separate skill.
 
 Your job is limited to five things: run the queries below, copy their rows **unchanged** into a data block, ask about external invoices when needed, and output the page. The template does all calculation, formatting, charts, checks and findings.
 
@@ -39,10 +39,7 @@ For each query, keep only the columns listed under "Copy columns", in that order
 | `monthly` | Q3 | budget, service, date:month, total_billable_revenue, total_time, total_cost *(Management only)* |
 | `invoices_finalized` | Q4, state 2 | invoice_reference, invoice.number, invoice.invoiced_on, budget.name, date_from, date_to, amount |
 | `invoices_draft` | Q4, state 1 | same as above |
-| `bookings_confirmed` | Q5, draft false | budget, person, service, date:week, time, person.placeholder |
-| `bookings_tentative` | Q5, draft true | same as above |
-| `time_weekly` | Q6 | budget, person, service, date:week, total_time, total_billable_time |
-| `time_status` | Q7 | person, status, total_time |
+| `time_status` | Q5 | person, status, total_time |
 
 **Q1 – services**
 ```json
@@ -65,17 +62,7 @@ For each query, keep only the columns listed under "Copy columns", in that order
 ```
 Fill `invoice_reference` with the invoice's visible reference (e.g. `#1521694`, or the invoice number).
 
-**Q5 – bookings by week** (run twice: with `"eq":false` for confirmed, and with `"eq":true` for tentative)
-```json
-{"report_type":"booking_reports","group_by":["budget","person","service","date:week"],"filters":{"project_id":{"eq":"<project-record-id>"},"stage_type":{"eq":2},"booking_type":{"eq":"service"},"draft":{"eq":false}},"sort_by":"budget","include_fields":["person.placeholder","service.name"],"display_fields":["budget","person","service","date:week","time","person.placeholder"],"report_layout":"table","limit":200,"offset":0}
-```
-
-**Q6 – time by week**
-```json
-{"report_type":"time_entry_reports","group_by":["budget","person","service","date:week"],"filters":{"project_id":{"eq":"<project-record-id>"},"stage_type":{"eq":2}},"sort_by":"budget","display_fields":["budget","person","service","date:week","total_time","total_billable_time"],"report_layout":"table","limit":200,"offset":0}
-```
-
-**Q7 – time by approval status**
+**Q5 – time by approval status**
 ```json
 {"report_type":"time_entry_reports","group_by":["person","status"],"filters":{"project_id":{"eq":"<project-record-id>"},"stage_type":{"eq":2}},"sort_by":"person","display_fields":["person","status","total_time"],"report_layout":"table","limit":200,"offset":0}
 ```
@@ -100,7 +87,8 @@ Fill `invoice_reference` with the invoice's visible reference (e.g. `#1521694`, 
 
 ```json
 {
-  "template": "1.1",
+  "template": "2.1",
+  "report": "budget",
   "view": "Management | PM",
   "as_of": "<current date and time, Europe/Berlin, e.g. 2026-10-22T14:05:00+02:00>",
   "project": {"name": "<project name>", "customer": "<company.name>", "project_manager": "<first last>", "timezone": "Europe/Berlin"},
@@ -114,7 +102,7 @@ Fill `invoice_reference` with the invoice's visible reference (e.g. `#1521694`, 
 }
 ```
 
-- Each `rows` entry is one result row: its values in the same order as `cols`, copied exactly as returned. For example, keep `"34800.00 EUR"`, `"1170 min"`, `"Week 21, 2026"` and `"No"` as they are.
+- Each `rows` entry is one result row: its values in the same order as `cols`, copied exactly as returned. For example, keep `"34800.00 EUR"`, `"1170 min"`, `"3 person-days (24 h)"` and `"May 2026"` as they are.
 - Copy `null` and empty values as they are.
 - When external invoices were supplied, set `external_invoices` to `{"source": "...", "supplied_by": "...", "supplied_on": "YYYY-MM-DD", "rows": [{"number": "...", "issue_date": "...", "service_from": "...", "service_to": "...", "budget": "...", "net_amount": 0.0}]}`.
 
@@ -128,7 +116,7 @@ Create an **in-chat HTML artifact** containing exactly the code below, with the 
 <div id="report"></div>
 <script>window.REPORT_DATA = DATA_BLOCK;</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/OSnow-Ser/serity-report-template@v1.1/report-template.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/OSnow-Ser/serity-report-template@v2.1/report-template.js"></script>
 ```
 
 After the artifact, reply with one line: the view and the project name.
@@ -137,5 +125,5 @@ If the report shows a red "Report not rendered" banner, tell the user which chec
 
 ## Guardrails
 
-- This skill is read-only. Never create, edit or finalize invoices, bookings or time entries.
+- This skill is read-only. Never create, edit or finalize invoices, budgets or time entries.
 - Never put cost, margin or profit data into a PM view.
